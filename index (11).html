@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The State of Democracy 2024</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#f7f7f7;color:#000;font-family:Arial,Helvetica,sans-serif}
+body{min-height:100vh;overflow-x:hidden}
+.page{width:100%;max-width:1400px;min-height:100vh;margin:0 auto;padding:72px clamp(24px,5vw,72px) 60px;display:grid;grid-template-columns:minmax(230px,300px) minmax(0,1fr);column-gap:clamp(36px,4vw,64px);align-items:center}
+.text-block{width:100%;max-width:340px;border-right:2px solid #000;padding-right:clamp(24px,3vw,44px);min-height:440px;position:relative}
+.chart-wrap{width:100%;position:relative;margin-top:0}
+h1{margin:0 0 28px;font-size:clamp(20px,2.8vw,34px);line-height:1;font-weight:700;letter-spacing:-.03em}
+.intro{max-width:340px;margin:0 0 10px;font-size:clamp(10px,1.09vw,13px);line-height:1.45}
+.selected-info{min-height:28px;margin:28px 0 0;position:static;font-size:clamp(13.6px,1.6vw,17.6px);line-height:1.15;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
+svg{display:block;width:100%;height:auto;overflow:visible;touch-action:manipulation}
+.dot{fill:#000;cursor:pointer;transition:fill .22s ease}
+.status{font-size:12px;margin-top:8px;min-height:16px;opacity:.45}
+@media(max-width:700px){
+ .page{padding:28px 14px 40px;display:block;min-height:0}
+ .chart-wrap{margin-top:8px}
+ .text-block{max-width:100%;border-right:0;padding-right:0;min-height:0}
+ h1{font-size:20px;margin-bottom:20px}
+ .intro{font-size:10px;line-height:1.42;margin-bottom:0;padding-bottom:18px;border-bottom:2px solid #000}
+ .selected-info{font-size:13.6px;margin:24px 0 0;position:static;min-height:20px}
+}
+</style>
+</head>
+<body>
+<main class="page">
+<div class="text-block">
+<h1>The State of Democracy 2024</h1>
+<p class="intro">Electoral democracy scores for 2024. The visualization uses the V-Dem Electoral Democracy Index, which measures the extent to which countries meet core standards of electoral democracy, including free and fair elections, freedom of expression, freedom of association, and elected government. The original index ranges from 0–1 and is scaled here to 0–10, with higher values indicating higher levels of electoral democracy.</p>
+<div id="selected-info" class="selected-info" aria-live="polite"></div>
+</div>
+<div class="chart-wrap">
+<svg id="viz" viewBox="0 0 1000 520" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Countries positioned geographically and represented by democracy score dots"></svg>
+<div id="status" class="status" aria-live="polite"></div>
+</div>
+</main>
+<script src="d3.v7.js"></script>
+<script>
+(async function(){
+  const svg=d3.select('#viz');
+  const W=1000,H=520;
+  const colors={low:'#FF2612',mid:'#FFE100',high:'#49EC41'};
+  const projection=d3.geoNaturalEarth1().scale(225).translate([W/2-135,H/2-8]);
+  const radius=d3.scaleSqrt().domain([0,10]).range([2.8,15]);
+  const dotsLayer=svg.append('g').attr('class','dots');
+  const selectedInfo=document.getElementById('selected-info');
+  const status=document.getElementById('status');
+
+  function category(score){
+    if(score<10/3) return colors.low;
+    if(score<20/3) return colors.mid;
+    return colors.high;
+  }
+  function clearInfo(){ selectedInfo.textContent=''; selectedInfo.style.color='#000'; }
+  function showInfo(d){ selectedInfo.textContent=`${d.name.toUpperCase()} · ${d.score.toFixed(2)}`; selectedInfo.style.color=category(d.score); }
+
+  try{
+    const response=await fetch('data.json',{cache:'no-store'});
+    if(!response.ok) throw new Error('Could not load data.json ('+response.status+')');
+    const data=await response.json();
+    if(!Array.isArray(data)) throw new Error('data.json is not an array');
+    status.textContent='';
+
+    const circles=dotsLayer.selectAll('circle').data(data,d=>d.code).join('circle')
+      .attr('class','dot')
+      .attr('cx',d=>projection([d.lon,d.lat])[0])
+      .attr('cy',d=>projection([d.lon,d.lat])[1])
+      .attr('r',d=>radius(d.score))
+      .attr('data-revealed','false')
+      .attr('aria-label',d=>`${d.name}, ${d.score.toFixed(2)}`)
+      .style('fill','#000');
+
+    function reveal(node,d){
+      node.dataset.revealed='true';
+      d3.select(node).style('fill',category(d.score));
+      showInfo(d);
+    }
+    function preview(node,d){
+      d3.select(node).style('fill',category(d.score));
+      showInfo(d);
+    }
+    function restore(node){
+      if(node.dataset.revealed!=='true') d3.select(node).style('fill','#000');
+      if(node.dataset.revealed==='true') showInfo(d); else clearInfo();
+    }
+
+    circles.on('pointerenter',function(event,d){preview(this,d)})
+      .on('pointerleave',function(){restore(this)})
+      .on('pointerdown',function(event,d){
+        if(event.pointerType==='touch'){
+          event.preventDefault();
+          reveal(this,d);
+        }
+      })
+      .on('click',function(event,d){
+        if(event.pointerType!=='touch') reveal(this,d);
+      });
+
+    svg.on('pointerdown',function(event){
+      if(event.target===svg.node()) clearInfo();
+    });
+
+    function updateDivider(){
+      const textBlock=document.querySelector('.text-block');
+      if(!window.matchMedia('(min-width: 701px)').matches){
+        textBlock.style.height='';
+        return;
+      }
+      const rect=svg.node().getBoundingClientRect();
+      const scale=rect.height/H;
+      const lowest=d3.max(data,d=>projection([d.lon,d.lat])[1] + radius(d.score));
+      textBlock.style.height=Math.ceil(lowest*scale)+'px';
+    }
+    updateDivider();
+    window.addEventListener('resize',updateDivider);
+  }catch(err){
+    console.error(err);
+    status.textContent='Data could not be loaded. Please make sure index.html, data.json, and d3.v7.js are in the same folder.';
+  }
+})();
+</script>
+</body>
+</html>
